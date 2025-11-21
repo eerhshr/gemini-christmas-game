@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Holiday Dino Run</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky Blue */
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #gameCanvas {
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F7FA 100%);
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            border: 8px solid #2c3e50;
+            border-radius: 10px;
+        }
+        #ui-layer {
+            position: absolute;
+            pointer-events: none;
+            width: 800px;
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .hud {
+            padding: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #d35400;
+            text-shadow: 2px 2px 0px #fff;
+            display: flex;
+            justify-content: space-between;
+        }
+        #message-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 40px;
+            border-radius: 20px;
+            border: 4px solid #c0392b;
+            box-shadow: 10px 10px 0px rgba(0,0,0,0.1);
+        }
+        h1 { margin-top: 0; color: #c0392b; font-size: 40px; }
+        p { font-size: 20px; color: #2c3e50; }
+        button {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-family: inherit;
+            border-bottom: 5px solid #1e8449;
+            transition: transform 0.1s;
+        }
+        button:active { transform: translateY(4px); border-bottom: 1px solid #1e8449; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="hud">
+            <span id="score-display">Presents: 0 / 10</span>
+            <span>Destination: Santa's House</span>
+        </div>
+    </div>
+
+    <div id="message-screen">
+        <h1 id="msg-title">Holiday Run!</h1>
+        <canvas id="grinch-face" width="100" height="100" style="display:none; margin: 0 auto;"></canvas>
+        <p id="msg-text">Collect 10 presents to save Christmas!</p>
+        <button onclick="startGame()">Play Now</button>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score-display');
+    const msgScreen = document.getElementById('message-screen');
+    const msgTitle = document.getElementById('msg-title');
+    const msgText = document.getElementById('msg-text');
+    const grinchCanvas = document.getElementById('grinch-face');
+
+    // Game State
+    let gameRunning = false;
+    let frame = 0;
+    let score = 0;
+    let gameSpeed = 5;
+    const WIN_SCORE = 10;
+    let distance = 0;
+
+    // Assets (Drawn programmatically to look hand-drawn)
+    const groundHeight = 350;
+
+    // Player (Dino)
+    const dino = {
+        x: 50,
+        y: groundHeight,
+        width: 60,
+        height: 60,
+        dy: 0,
+        jumpPower: -13,
+        gravity: 0.6,
+        grounded: true,
+        draw: function() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            
+            // Hand-drawn outline style
+            ctx.lineWidth = 3;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#2d3436';
+
+            // Tail
+            ctx.beginPath();
+            ctx.moveTo(0, -20);
+            ctx.quadraticCurveTo(-20, -10, -25, 0);
+            ctx.lineTo(10, 0);
+            ctx.fillStyle = '#7bed9f';
+            ctx.fill();
+            ctx.stroke();
+
+            // Body
+            ctx.fillStyle = '#7bed9f';
+            ctx.beginPath();
+            ctx.ellipse(15, -25, 20, 25, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Head
+            ctx.beginPath();
+            ctx.arc(30, -45, 18, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Eye (Disney style big eye)
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.ellipse(34, -50, 6, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(36, -50, 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Smile
+            ctx.beginPath();
+            ctx.arc(35, -40, 8, 0.1, Math.PI * 0.8);
+            ctx.stroke();
+
+            // Santa Hat
+            ctx.fillStyle = '#e74c3c'; // Red
+            ctx.beginPath();
+            ctx.moveTo(15, -58);
+            ctx.quadraticCurveTo(25, -90, 55, -55);
+            ctx.lineTo(45, -55);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Hat Fur
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.rect(12, -60, 40, 10);
+            ctx.fill();
+            ctx.stroke();
+
+            // Pom Pom
+            ctx.beginPath();
+            ctx.arc(55, -55, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Legs (Simple animation)
+            const legOffset = Math.sin(frame * 0.2) * 10;
+            ctx.lineWidth = 3;
+            // Leg 1
+            ctx.beginPath();
+            ctx.moveTo(10, 0);
+            ctx.lineTo(10, 15 + legOffset);
+            ctx.lineTo(20, 15 + legOffset);
+            ctx.stroke();
+            // Leg 2
+            ctx.beginPath();
+            ctx.moveTo(25, 0);
+            ctx.lineTo(25, 15 - legOffset);
+            ctx.lineTo(35, 15 - legOffset);
+            ctx.stroke();
+
+            ctx.restore();
+        },
+        update: function() {
+            // Jump Physics
+            this.dy += this.gravity;
+            this.y += this.dy;
+
+            // Ground Collision
+            if (this.y > groundHeight - 20) {
+                this.y = groundHeight - 20;
+                this.dy = 0;
+                this.grounded = true;
+            } else {
+                this.grounded = false;
+            }
+        },
+        jump: function() {
+            if (this.grounded) {
+                this.dy = this.jumpPower;
+                this.grounded = false;
+            }
+        }
+    };
+
+    // Obstacles (Christmas Trees)
+    const obstacles = [];
+    class Tree {
+        constructor(x) {
+            this.x = x;
+            this.y = groundHeight;
+            this.width = 40;
+            this.height = 60;
+            this.markedForDeletion = false;
+        }
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            
+            // Trunk
+            ctx.fillStyle = '#795548';
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 2;
+            ctx.fillRect(15, -10, 10, 10);
+            ctx.strokeRect(15, -10, 10, 10);
+
+            // Leaves (Triangles)
+            ctx.fillStyle = '#2ecc71';
+            ctx.beginPath();
+            ctx.moveTo(0, -10);
+            ctx.lineTo(20, -70);
+            ctx.lineTo(40, -10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Ornaments
+            ctx.fillStyle = '#f1c40f'; // Gold
+            ctx.beginPath(); ctx.arc(20, -70, 4, 0, Math.PI*2); ctx.fill(); // Star
+            ctx.fillStyle = '#e74c3c'; // Red ball
+            ctx.beginPath(); ctx.arc(10, -30, 3, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#3498db'; // Blue ball
+            ctx.beginPath(); ctx.arc(30, -50, 3, 0, Math.PI*2); ctx.fill();
+            
+            ctx.restore();
+        }
+        update() {
+            this.x -= gameSpeed;
+            if (this.x < -50) this.markedForDeletion = true;
+        }
+    }
+
+    // Collectibles (Presents)
+    const presents = [];
+    class Present {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.width = 30;
+            this.height = 30;
+            this.markedForDeletion = false;
+            this.bobOffset = Math.random() * Math.PI;
+        }
+        draw() {
+            const bobY = Math.sin(frame * 0.1 + this.bobOffset) * 5;
+            ctx.save();
+            ctx.translate(this.x, this.y + bobY);
+            
+            // Box
+            ctx.fillStyle = '#e74c3c';
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'black';
+            ctx.fillRect(0, 0, 30, 30);
+            ctx.strokeRect(0, 0, 30, 30);
+
+            // Ribbon (Yellow)
+            ctx.fillStyle = '#f1c40f';
+            ctx.fillRect(12, 0, 6, 30); // Vertical
+            ctx.fillRect(0, 12, 30, 6); // Horizontal
+            
+            ctx.restore();
+        }
+        update() {
+            this.x -= gameSpeed;
+            if (this.x < -50) this.markedForDeletion = true;
+        }
+    }
+
+    // Game Loop Functions
+    function spawnObstacle() {
+        if (frame % 120 === 0) { // Spawn tree every ~2 seconds
+            // Randomly add a tree or just a gap, but ensure playable
+            let xPos = canvas.width + Math.random() * 100;
+            obstacles.push(new Tree(xPos));
+            
+            // Spawn a present in the air after the tree
+            if (Math.random() > 0.3) {
+                let pY = groundHeight - 80 - (Math.random() * 50); // Variable height
+                presents.push(new Present(xPos + 150 + Math.random() * 50, pY));
+            }
+        }
+    }
+
+    function checkCollisions() {
+        // Tree Collision (Loss)
+        obstacles.forEach(tree => {
+            if (
+                dino.x < tree.x + tree.width &&
+                dino.x + dino.width - 20 > tree.x && // Adjust hitbox
+                dino.y - 40 < tree.y && // Dino height
+                dino.y > tree.y - tree.height
+            ) {
+                gameOver();
+            }
+        });
+
+        // Present Collision (Collect)
+        presents.forEach(p => {
+            if (!p.markedForDeletion &&
+                dino.x < p.x + p.width &&
+                dino.x + dino.width > p.x &&
+                dino.y - 50 < p.y + p.height &&
+                dino.y > p.y
+            ) {
+                p.markedForDeletion = true;
+                score++;
+                scoreEl.innerText = `Presents: ${score} / ${WIN_SCORE}`;
+                
+                // Win Condition
+                if (score >= WIN_SCORE) {
+                    gameWin();
+                }
+            }
+        });
+    }
+
+    function drawBackground() {
+        // Sky is CSS
+        // Hills
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.moveTo(0, groundHeight);
+        // Draw sine wave snow
+        for (let i = 0; i <= canvas.width; i+=10) {
+            ctx.lineTo(i, groundHeight + Math.sin(i * 0.01 + distance * 0.002) * 10);
+        }
+        ctx.lineTo(canvas.width, canvas.height);
+        ctx.lineTo(0, canvas.height);
+        ctx.fill();
+
+        // "Hand drawn" stroke for ground
+        ctx.strokeStyle = '#b2bec3';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    function drawGrinch(ctxTarget) {
+        // Helper to draw the Grinch face for Game Over
+        const gCtx = ctxTarget;
+        gCtx.clearRect(0,0,100,100);
+        
+        // Face
+        gCtx.fillStyle = '#7cfc00'; // Grinch Green
+        gCtx.beginPath();
+        gCtx.moveTo(50, 90);
+        gCtx.bezierCurveTo(10, 80, 10, 10, 50, 10);
+        gCtx.bezierCurveTo(90, 10, 90, 80, 50, 90);
+        gCtx.fill();
+        gCtx.lineWidth = 2;
+        gCtx.stroke();
+
+        // Evil Eyes
+        gCtx.fillStyle = 'yellow';
+        gCtx.beginPath();
+        gCtx.moveTo(30, 40); gCtx.quadraticCurveTo(40, 30, 50, 40); // Left Eye top
+        gCtx.quadraticCurveTo(40, 50, 30, 40); 
+        gCtx.fill(); gCtx.stroke();
+        
+        gCtx.beginPath();
+        gCtx.moveTo(50, 40); gCtx.quadraticCurveTo(60, 30, 70, 40); // Right Eye top
+        gCtx.quadraticCurveTo(60, 50, 50, 40); 
+        gCtx.fill(); gCtx.stroke();
+        
+        // Pupils
+        gCtx.fillStyle = 'red';
+        gCtx.beginPath(); gCtx.arc(40, 40, 2, 0, Math.PI*2); gCtx.fill();
+        gCtx.beginPath(); gCtx.arc(60, 40, 2, 0, Math.PI*2); gCtx.fill();
+
+        // Evil Grin
+        gCtx.beginPath();
+        gCtx.moveTo(30, 65);
+        gCtx.bezierCurveTo(40, 75, 60, 75, 70, 60);
+        gCtx.stroke();
+    }
+
+    function gameWin() {
+        gameRunning = false;
+        msgScreen.style.display = 'block';
+        msgTitle.innerText = "YOU SAVED CHRISTMAS!";
+        msgTitle.style.color = "#27ae60";
+        msgText.innerHTML = `You delivered ${score} presents to Santa's House!<br>The Grinch is defeated!`;
+        grinchCanvas.style.display = 'none';
+        
+        // Draw Santa House on Canvas for effect
+        ctx.save();
+        ctx.translate(600, groundHeight - 100);
+        ctx.fillStyle = '#c0392b';
+        ctx.fillRect(0, 20, 80, 80); // House body
+        ctx.fillStyle = 'white';
+        ctx.beginPath(); ctx.moveTo(-10, 20); ctx.lineTo(40, -20); ctx.lineTo(90, 20); ctx.fill(); // Roof
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillRect(30, 60, 20, 40); // Door
+        ctx.restore();
+    }
+
+    function gameOver() {
+        gameRunning = false;
+        msgScreen.style.display = 'block';
+        msgTitle.innerText = "OH NO!";
+        msgTitle.style.color = "#c0392b";
+        msgText.innerText = "The Grinch stole the presents! Try again.";
+        
+        // Show Grinch Face
+        grinchCanvas.style.display = 'block';
+        const gCtx = grinchCanvas.getContext('2d');
+        drawGrinch(gCtx);
+    }
+
+    function update() {
+        if (!gameRunning) return;
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        frame++;
+        distance += gameSpeed;
+
+        drawBackground();
+        
+        spawnObstacle();
+
+        dino.update();
+        dino.draw();
+
+        // Update and draw obstacles
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            obstacles[i].update();
+            obstacles[i].draw();
+            if (obstacles[i].markedForDeletion) obstacles.splice(i, 1);
+        }
+
+        // Update and draw presents
+        for (let i = presents.length - 1; i >= 0; i--) {
+            presents[i].update();
+            presents[i].draw();
+            if (presents[i].markedForDeletion) presents.splice(i, 1);
+        }
+
+        checkCollisions();
+
+        requestAnimationFrame(update);
+    }
+
+    function startGame() {
+        gameRunning = true;
+        score = 0;
+        frame = 0;
+        obstacles.length = 0;
+        presents.length = 0;
+        dino.y = groundHeight - 20;
+        dino.dy = 0;
+        scoreEl.innerText = `Presents: 0 / ${WIN_SCORE}`;
+        msgScreen.style.display = 'none';
+        update();
+    }
+
+    // Inputs
+    window.addEventListener('keydown', function(e) {
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            if (gameRunning) {
+                dino.jump();
+            } else if (msgScreen.style.display !== 'none') {
+                startGame();
+            }
+        }
+    });
+
+    // Show initial screen
+    msgScreen.style.display = 'block';
+
+</script>
+</body>
+</html>

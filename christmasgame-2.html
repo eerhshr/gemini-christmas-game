@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Holiday Run</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #e0f7fa;
+            font-family: 'Fredoka One', cursive; /* Google Doodle style font */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            user-select: none;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        #gameCanvas {
+            background: linear-gradient(to bottom, #4fc3f7 0%, #b3e5fc 100%);
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .score-pill {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #0277bd;
+            padding: 10px 25px;
+            border-radius: 30px;
+            font-size: 24px;
+            box-shadow: 0 4px 0 rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        /* Start/End Screen Overlay */
+        #menu-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+            backdrop-filter: blur(4px);
+        }
+        .card {
+            background: white;
+            padding: 40px 60px;
+            border-radius: 25px;
+            text-align: center;
+            box-shadow: 0 10px 0 rgba(0,0,0,0.1);
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        h1 { margin: 0 0 10px 0; color: #d32f2f; font-size: 48px; letter-spacing: 1px; }
+        p { margin: 0 0 30px 0; color: #546e7a; font-size: 20px; }
+        
+        .btn {
+            background: #43a047;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 24px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-family: 'Fredoka One', cursive;
+            box-shadow: 0 6px 0 #2e7d32;
+            transition: transform 0.1s;
+        }
+        .btn:active { transform: translateY(6px); box-shadow: none; }
+        
+        @keyframes popIn {
+            from { transform: scale(0.5); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="900" height="500"></canvas>
+        
+        <div id="ui-layer">
+            <div class="score-pill">
+                <span style="font-size:30px">🎁</span> 
+                <span id="score-text">0 / 10</span>
+            </div>
+        </div>
+
+        <div id="menu-overlay">
+            <div class="card">
+                <h1 id="title-text">Holiday Run</h1>
+                <p id="desc-text">Collect 10 presents to save Christmas<br></p>
+                <button class="btn" onclick="startGame()">Start Running</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score-text');
+    const menuOverlay = document.getElementById('menu-overlay');
+    const titleText = document.getElementById('title-text');
+    const descText = document.getElementById('desc-text');
+    const btn = document.querySelector('.btn');
+
+    // Game States
+    let gameState = 'MENU'; // MENU, PLAYING, CUTSCENE_LOSS, WON
+    let frame = 0;
+    let score = 0;
+    let gameSpeed = 6;
+    const WIN_SCORE = 10;
+    const GROUND_Y = 400;
+
+    // Assets & Logic
+    let obstacles = [];
+    let presents = [];
+    
+    // Cutscene Variables
+    let cutsceneTimer = 0;
+    let grinchX = 1000; // Start off screen right
+    // Track the active requestAnimationFrame id so we can cancel duplicate loops
+    let rafId = null;
+
+    // --- ART ASSETS (Google Doodle Style: No strokes, soft shapes) ---
+
+    // Helper for rounded shapes
+    function drawRoundedRect(ctx, x, y, w, h, r, color) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, r);
+        ctx.fill();
+    }
+
+    function drawCircle(ctx, x, y, r, color) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // THE ELF (Player)
+    const elf = {
+        x: 100,
+        y: GROUND_Y,
+        dy: 0,
+        width: 50,
+        height: 70,
+        grounded: true,
+        jumpPower: -15,
+        gravity: 0.7,
+        draw: function(isSad = false) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+
+            const bounce = isSad ? 0 : Math.sin(frame * 0.3) * 3;
+
+            // Legs (Moving)
+            ctx.fillStyle = '#2e7d32'; // Dark Green pants
+            if (this.grounded && !isSad) {
+                drawRoundedRect(ctx, 10, -20, 12, 20, 5, '#2e7d32'); // Back leg
+                drawRoundedRect(ctx, 28, -20 + (Math.sin(frame*0.5)*10), 12, 20, 5, '#2e7d32'); // Front leg
+            } else {
+                drawRoundedRect(ctx, 10, -25, 12, 20, 5, '#2e7d32');
+                drawRoundedRect(ctx, 28, -15, 12, 20, 5, '#2e7d32');
+            }
+
+            // Body (Tunic)
+            ctx.translate(0, bounce); // Bounce whole upper body
+            drawRoundedRect(ctx, 0, -60, 50, 45, 10, '#43a047'); // Green
+            
+            // Belt
+            drawRoundedRect(ctx, 0, -35, 50, 8, 2, '#263238');
+            drawRoundedRect(ctx, 20, -36, 10, 10, 2, '#fdd835'); // Gold Buckle
+
+            // Collar (Red zigzag)
+            ctx.fillStyle = '#d32f2f';
+            ctx.beginPath();
+            ctx.moveTo(0, -60);
+            ctx.lineTo(10, -50); ctx.lineTo(25, -60); ctx.lineTo(40, -50); ctx.lineTo(50, -60);
+            ctx.lineTo(50, -55); ctx.lineTo(0, -55);
+            ctx.fill();
+
+            // Head
+            drawCircle(ctx, 25, -70, 18, '#ffccbc'); // Skin
+
+            // Hat (Cone)
+            ctx.fillStyle = '#43a047';
+            ctx.beginPath();
+            ctx.moveTo(5, -75);
+            ctx.lineTo(45, -75);
+            ctx.quadraticCurveTo(25, -110, 10, -105); // Floppy tip
+            ctx.fill();
+            drawCircle(ctx, 10, -105, 5, '#fff'); // Pom pom
+
+            // Face
+            ctx.fillStyle = '#3e2723';
+            if(isSad) {
+                 // Sad eyes
+                drawCircle(ctx, 30, -72, 2, '#3e2723');
+                ctx.beginPath(); ctx.arc(28, -65, 3, Math.PI, 0); ctx.stroke(); // Frown
+            } else {
+                // Happy eyes
+                drawCircle(ctx, 30, -72, 2, '#3e2723');
+                drawCircle(ctx, 35, -72, 2, '#3e2723');
+                ctx.beginPath(); ctx.arc(30, -68, 5, 0.1, Math.PI * 0.8); ctx.strokeStyle='#3e2723'; ctx.lineWidth=1.5; ctx.stroke();
+            }
+
+            ctx.restore();
+        },
+        update: function() {
+            if (gameState !== 'PLAYING') return;
+            this.dy += this.gravity;
+            this.y += this.dy;
+            if (this.y > GROUND_Y) {
+                this.y = GROUND_Y;
+                this.dy = 0;
+                this.grounded = true;
+            } else {
+                this.grounded = false;
+            }
+        },
+        jump: function() {
+            if (this.grounded) {
+                this.dy = this.jumpPower;
+                this.grounded = false;
+            }
+        }
+    };
+
+    // THE GRINCH (Dr. Seuss / Cartoon Style)
+    const grinch = {
+        draw: function(x, y, frameCount, hasSack = false) {
+            ctx.save();
+            ctx.translate(x, y);
+            const walkBob = Math.sin(frameCount * 0.2) * 5;
+
+            // Legs
+            ctx.fillStyle = '#7CFC00'; // Grinch Green
+            // Leg 1
+            ctx.beginPath(); ctx.moveTo(15, -10); ctx.lineTo(15, 10 + walkBob); ctx.lineTo(5, 10 + walkBob); ctx.lineTo(10, -10); ctx.fill();
+            // Leg 2
+            ctx.beginPath(); ctx.moveTo(35, -10); ctx.lineTo(35, 10 - walkBob); ctx.lineTo(45, 10 - walkBob); ctx.lineTo(40, -10); ctx.fill();
+
+            ctx.translate(0, Math.abs(walkBob) * 0.5); // Body bob
+
+            // Body (Pear shape)
+            ctx.beginPath();
+            ctx.moveTo(25, -80); // Neck
+            ctx.bezierCurveTo(60, -70, 60, -20, 25, -10); // Back
+            ctx.bezierCurveTo(-10, -20, -10, -70, 25, -80); // Belly
+            ctx.fill();
+
+            // Santa Coat (Red)
+            ctx.fillStyle = '#d32f2f';
+            ctx.beginPath();
+            ctx.moveTo(25, -80);
+            ctx.bezierCurveTo(55, -70, 55, -30, 25, -30);
+            ctx.bezierCurveTo(-5, -30, -5, -70, 25, -80);
+            ctx.fill();
+            // Fur trim vertical
+            ctx.fillStyle = 'white';
+            drawRoundedRect(ctx, 22, -80, 6, 50, 3, 'white');
+            // Belt
+            drawRoundedRect(ctx, 10, -45, 30, 5, 2, 'black');
+
+            // Head (The iconic shape)
+            ctx.fillStyle = '#7CFC00'; 
+            ctx.beginPath();
+            ctx.moveTo(25, -80);
+            // Cheeks flair out
+            ctx.bezierCurveTo(5, -80, 0, -100, 10, -110); // Left cheek
+            ctx.quadraticCurveTo(25, -120, 40, -110); // Top head
+            ctx.bezierCurveTo(50, -100, 45, -80, 25, -80); // Right cheek
+            ctx.fill();
+
+            // Face Features
+            // Eyes (Yellow, slanted)
+            ctx.fillStyle = '#ffeb3b';
+            ctx.beginPath();
+            ctx.ellipse(18, -105, 4, 6, Math.PI/4, 0, Math.PI*2); // Left
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(32, -105, 4, 6, -Math.PI/4, 0, Math.PI*2); // Right
+            ctx.fill();
+            // Pupils (Red)
+            ctx.fillStyle = '#d50000';
+            drawCircle(ctx, 19, -105, 1.5, '#d50000');
+            drawCircle(ctx, 31, -105, 1.5, '#d50000');
+
+            // The Grin (Wavy line)
+            ctx.strokeStyle = '#1b5e20'; // Dark green stroke
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(10, -95);
+            ctx.bezierCurveTo(15, -85, 35, -85, 40, -95); // Smile
+            ctx.stroke();
+
+            // Santa Hat
+            ctx.fillStyle = '#d32f2f';
+            ctx.beginPath();
+            ctx.moveTo(10, -112);
+            ctx.lineTo(40, -112);
+            ctx.quadraticCurveTo(25, -140, 5, -130);
+            ctx.fill();
+            drawRoundedRect(ctx, 8, -115, 34, 8, 4, 'white'); // Brim
+            drawCircle(ctx, 5, -130, 5, 'white'); // Pom
+
+            // The Sack (If he stole them)
+            if (hasSack) {
+                ctx.fillStyle = '#8d6e63'; // Brown sack
+                ctx.beginPath();
+                ctx.arc(50, -40, 20, 0, Math.PI*2);
+                ctx.fill();
+                // Presents sticking out
+                drawRoundedRect(ctx, 45, -55, 10, 10, 2, '#f44336');
+            }
+
+            ctx.restore();
+        }
+    };
+
+    // OBSTACLES (Trees)
+    class Tree {
+        constructor(x) {
+            this.x = x;
+            this.y = GROUND_Y;
+            // Make trees larger than the elf: original design used w=40,h=60
+            this.w = 80;
+            this.h = 120;
+            this.marked = false;
+        }
+        draw() {
+            // scale factor based on original coordinates (original w = 40)
+            const s = this.w / 40;
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            
+            // Simple geometric tree (scaled)
+            // Trunk
+            drawRoundedRect(ctx, 15 * s, -10 * s, 10 * s, 10 * s, 2 * s, '#5d4037');
+            // Layers
+            ctx.fillStyle = '#43a047'; // Base Green
+            
+            // Bottom Tier
+            ctx.beginPath();
+            ctx.moveTo(0, -10 * s); ctx.lineTo(40 * s, -10 * s); ctx.lineTo(20 * s, -40 * s); ctx.fill();
+            
+            // Top Tier
+            ctx.fillStyle = '#66bb6a'; // Slightly lighter
+            ctx.beginPath();
+            ctx.moveTo(5 * s, -30 * s); ctx.lineTo(35 * s, -30 * s); ctx.lineTo(20 * s, -60 * s); ctx.fill();
+
+            // Ornaments (scaled positions and sizes)
+            drawCircle(ctx, 10 * s, -20 * s, 3 * s, '#f44336');
+            drawCircle(ctx, 30 * s, -25 * s, 3 * s, '#29b6f6');
+            drawCircle(ctx, 20 * s, -50 * s, 3 * s, '#ffeb3b');
+
+            ctx.restore();
+        }
+        update() {
+            this.x -= gameSpeed;
+            // mark offscreen using the actual width
+            if (this.x < -this.w - 10) this.marked = true;
+        }
+    }
+
+    // COLLECTIBLES (Presents)
+    class Present {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.w = 30;
+            this.h = 30;
+            this.marked = false;
+            this.offset = Math.random() * Math.PI;
+        }
+        draw() {
+            let hover = Math.sin(frame * 0.1 + this.offset) * 5;
+            ctx.save();
+            ctx.translate(this.x, this.y + hover);
+            
+            // Box
+            drawRoundedRect(ctx, 0, 0, 30, 30, 4, '#ef5350'); // Red
+            // Ribbon
+            drawRoundedRect(ctx, 12, 0, 6, 30, 0, '#ffee58'); // Yellow Vert
+            drawRoundedRect(ctx, 0, 12, 30, 6, 0, '#ffee58'); // Yellow Horz
+            
+            ctx.restore();
+        }
+        update() {
+            this.x -= gameSpeed;
+            if (this.x < -50) this.marked = true;
+        }
+    }
+
+    function spawnEntities() {
+        if (frame % 100 === 0) {
+            let x = canvas.width + Math.random() * 100;
+            obstacles.push(new Tree(x));
+            
+            // Add present either above tree or after it
+            if (Math.random() > 0.3) {
+                let py = GROUND_Y - 90 - (Math.random() * 40);
+                presents.push(new Present(x + 150, py));
+            }
+        }
+    }
+
+    function drawBackground() {
+        // Sky is drawn via CSS, we just draw hills
+        
+        // Distant hills
+        ctx.fillStyle = '#b3e5fc';
+        ctx.beginPath();
+        ctx.moveTo(0, GROUND_Y);
+        for(let i=0; i<=canvas.width; i+=50) {
+            ctx.lineTo(i, GROUND_Y - 30 + Math.sin(i*0.01 + frame*0.002)*20);
+        }
+        ctx.lineTo(canvas.width, canvas.height);
+        ctx.lineTo(0, canvas.height);
+        ctx.fill();
+
+        // Foreground Snow
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.moveTo(0, GROUND_Y);
+        ctx.lineTo(canvas.width, GROUND_Y);
+        ctx.lineTo(canvas.width, canvas.height);
+        ctx.lineTo(0, canvas.height);
+        ctx.fill();
+        
+        // Subtle shadow on snow
+        ctx.fillStyle = '#e1f5fe';
+        ctx.fillRect(0, GROUND_Y, canvas.width, 10);
+    }
+
+    function checkCollisions() {
+        // Trees
+        obstacles.forEach(obs => {
+            if (
+                elf.x < obs.x + obs.w - 10 &&
+                elf.x + elf.width - 10 > obs.x + 10 &&
+                elf.y - 50 > obs.y - obs.h
+            ) {
+                triggerGameOver();
+            }
+        });
+
+        // Presents
+        presents.forEach(p => {
+            if (!p.marked &&
+                elf.x < p.x + p.w &&
+                elf.x + elf.width > p.x &&
+                elf.y - 60 < p.y + p.h &&
+                elf.y > p.y
+            ) {
+                p.marked = true;
+                score++;
+                updateUI();
+                if (score >= WIN_SCORE) triggerWin();
+            }
+        });
+    }
+
+    function updateUI() {
+        scoreEl.innerText = `${score} / ${WIN_SCORE}`;
+    }
+
+    // --- CUTSCENE LOGIC ---
+    function triggerGameOver() {
+        gameState = 'CUTSCENE_LOSS';
+        cutsceneTimer = 0;
+        grinchX = canvas.width + 50; // Start off screen
+    }
+
+    function updateCutscene() {
+        cutsceneTimer++;
+
+        // Draw static game world (no updates to positions)
+        drawBackground();
+        obstacles.forEach(o => o.draw());
+        presents.forEach(p => p.draw());
+        
+        // Draw Sad Elf
+        elf.draw(true); // true = sad mode
+
+        // Grinch Animation Sequence
+        // Phase 1: Walk in
+        if (cutsceneTimer < 120) {
+            if (grinchX > elf.x + 60) {
+                grinchX -= 3;
+            }
+            grinch.draw(grinchX, GROUND_Y, cutsceneTimer, false);
+        }
+        // Phase 2: Take Presents (Steal Animation)
+        else if (cutsceneTimer < 180) {
+            grinch.draw(grinchX, GROUND_Y, cutsceneTimer, true); // Has sack now
+            // Floating text
+            ctx.fillStyle = '#d32f2f';
+            ctx.font = "30px 'Fredoka One'";
+            ctx.fillText("MINE!", grinchX - 20, GROUND_Y - 140);
+            
+            // Drain Score visually
+            scoreEl.innerText = "0 / 10";
+        }
+        // Phase 3: Walk Away
+        else if (cutsceneTimer < 300) {
+            grinchX += 4;
+            grinch.draw(grinchX, GROUND_Y, cutsceneTimer, true);
+        }
+        // Phase 4: Menu
+        else {
+            showMenu("OH NO!", "The Grinch stole Christmas!", "Try Again");
+        }
+    }
+
+    function triggerWin() {
+        gameState = 'WON';
+        // Draw House
+        showMenu("YOU DID IT!", "Santa got the presents!", "Play Again");
+    }
+
+    function showMenu(title, desc, btnText) {
+        menuOverlay.style.display = 'flex';
+        titleText.innerText = title;
+        titleText.style.color = (title === "OH NO!") ? "#d32f2f" : "#43a047";
+        descText.innerText = desc;
+        btn.innerText = btnText;
+    }
+
+    function startGame() {
+        // Cancel any previously scheduled animation frame to avoid duplicate loops
+        if (rafId) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+
+        gameState = 'PLAYING';
+        menuOverlay.style.display = 'none';
+        score = 0;
+        obstacles = [];
+        presents = [];
+        elf.y = GROUND_Y;
+        elf.dy = 0;
+        frame = 0;
+        updateUI();
+        gameLoop();
+    }
+
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (gameState === 'PLAYING') {
+            frame++;
+            drawBackground();
+            spawnEntities();
+            
+            elf.update();
+            elf.draw();
+
+            obstacles.forEach((o, i) => {
+                o.update();
+                o.draw();
+                if (o.marked) obstacles.splice(i, 1);
+            });
+
+            presents.forEach((p, i) => {
+                p.update();
+                p.draw();
+                if (p.marked) presents.splice(i, 1);
+            });
+
+            checkCollisions();
+            rafId = requestAnimationFrame(gameLoop);
+
+        } else if (gameState === 'CUTSCENE_LOSS') {
+            updateCutscene();
+            rafId = requestAnimationFrame(gameLoop);
+        } else if (gameState === 'WON') {
+            drawBackground();
+            // Draw Santa House
+            ctx.fillStyle = '#b71c1c';
+            ctx.fillRect(600, GROUND_Y - 100, 100, 100);
+            ctx.fillStyle = 'white'; // Snow roof
+            ctx.beginPath(); ctx.moveTo(590, GROUND_Y - 100); ctx.lineTo(650, GROUND_Y - 150); ctx.lineTo(710, GROUND_Y - 100); ctx.fill();
+            elf.x = 550;
+            elf.draw();
+            // Stop loop, menu handles restart
+        }
+    }
+
+    // Input
+    window.addEventListener('keydown', e => {
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            if (gameState === 'PLAYING') elf.jump();
+            if (menuOverlay.style.display !== 'none') startGame();
+        }
+    });
+
+</script>
+</body>
+</html>
